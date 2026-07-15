@@ -1,0 +1,13 @@
+[package]
+name = "riklary_backend"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = "0.7"
+tokio = { version = "1.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tower-http = { version = "0.5", features = ["cors", "fs"] } # For handling file & cors
+epub = "2.1" #Lib for parsing EPUB and EPUB metadata
+zip = "8.6.0"

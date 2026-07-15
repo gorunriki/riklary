@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Riklary - E-Book Reader</title>
+    <!-- Tailwind CSS untuk UI cepat & rapi -->
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <!-- jszip dibutuhkan oleh epub.js di latar belakang -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.5/jszip.min.js"></script>
+    <!-- Library ePub.js via CDN resmi -->
+    <script src="https://cdn.jsdelivr.net/npm/epubjs@0.3.93/dist/epub.min.js"></script>
+</head>
+<body class="bg-gray-900 text-gray-100 min-h-screen">
+
+    <!-- NAV BAR -->
+    <nav class="bg-gray-800 p-4 border-b border-gray-700 shadow-md">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-xl font-bold tracking-wider text-emerald-400">📚 RIKLARY</h1>
+            <button id="back-to-library" class="hidden bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-sm transition">
+                Kembali ke Rak
+            </button>
+        </div>
+    </nav>
+
+    <!-- Halaman 1: RAK BUKU (Tampilan Awal) -->
+    <main id="library-view" class="container mx-auto p-6">
+        <h2 class="text-2xl font-semibold mb-6">Koleksi Buku Kamu</h2>
+        <!-- Tempat kartu buku di-render via JS -->
+        <div id="books-grid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+            <p class="text-gray-400 animate-pulse">Sedang memuat rak buku...</p>
+        </div>
+    </main>
+
+    <!-- Halaman 2: RUANG BACA (Tersembunyi di awal) -->
+    <main id="reader-view" class="hidden container mx-auto p-6 max-w-4xl">
+        <!-- Area Navigasi & Kontrol -->
+        <div class="flex justify-between items-center mb-4 bg-gray-800 p-3 rounded-lg border border-gray-700">
+            <button id="prev-page" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded font-medium shadow transition">◀ Prev</button>
+            <span id="book-title-display" class="font-semibold text-gray-300 truncate max-w-xs md:max-w-md">Judul Buku</span>
+            <button id="next-page" class="bg-emerald-600 hover:bg-emerald-500 px-4 py-2 rounded font-medium shadow transition">Next ▶</button>
+        </div>
+
+        <!-- Wadah tempat teks e-book di-render oleh ePub.js -->
+        <div id="viewer" class="bg-white text-gray-900 p-8 rounded-xl shadow-2xl h-[600px] border border-gray-200 overflow-hidden"></div>
+    </main>
+
+    <!-- LOGIKA JAVASCRIPT -->
+    <!-- LOGIKA JAVASCRIPT -->
+        <script>
+            const API_URL = "http://localhost:8080/api/books";
+            const STATIC_BASE = "http://localhost:8080/static/";
+
+            const libraryView = document.getElementById('library-view');
+            const readerView = document.getElementById('reader-view');
+            const booksGrid = document.getElementById('books-grid');
+            const backBtn = document.getElementById('back-to-library');
+            const viewer = document.getElementById('viewer');
+
+            let rendition = null;
+            let book = null;
+
+            async function loadLibrary() {
+                try {
+                    const response = await fetch(API_URL);
+                    const books = await response.json();
+
+                    booksGrid.innerHTML = '';
+
+                    books.forEach(b => {
+                        const card = document.createElement('div');
+                        card.className = "bg-gray-800 p-5 rounded-xl border border-gray-700 shadow-lg hover:border-emerald-500 transition cursor-pointer flex flex-col justify-between";
+
+                        const tags = b.subjects.map(t => `<span class="bg-gray-700 text-xs px-2 py-1 rounded text-gray-300">${t}</span>`).join(' ');
+
+                        card.innerHTML = `
+                            <div>
+                                <h3 class="text-lg font-bold text-white mb-1 line-clamp-2">${b.title}</h3>
+                                <p class="text-sm text-gray-400 mb-4">✍️ ${b.author}</p>
+                            </div>
+                            <div class="flex flex-wrap gap-1 mt-auto">${tags}</div>
+                        `;
+
+                        // PERBAIKAN: Mengirim b.extracted_path untuk lazy loading, dan b.file_name untuk key progress
+                        card.addEventListener('click', () => openBook(b.title, b.extracted_path, b.file_name));
+                        booksGrid.appendChild(card);
+                    });
+                } catch (err) {
+                    booksGrid.innerHTML = `<p class="text-red-400">Gagal terhubung ke backend Rust. Pastikan server sudah jalan!</p>`;
+                }
+            }
+
+            // PERBAIKAN LOGIKA: Membuka folder hasil unzipping secara streaming (Lazy Loading)
+            async function openBook(title, extractedPath, fileName) {
+                // 1. Tukar Tampilan UI & Set Judul
+                libraryView.classList.add('hidden');
+                readerView.classList.remove('hidden');
+                backBtn.classList.remove('hidden');
+                document.getElementById('book-title-display').innerText = title;
+
+                // Tampilkan indikator loading awal (Sangat cepat)
+                viewer.innerHTML = "<p class='text-gray-500 text-center pt-20 animate-pulse'>Memuat bab buku secara instan...</p>";
+
+                // Gabungkan alamat url statis folder ekstraksi
+                const bookUrl = STATIC_BASE + extractedPath;
+                console.log("Membuka folder e-book hasil ekstraksi:", bookUrl);
+
+                // Hancurkan objek instance lama untuk mencegah memory leak
+                if (book) {
+                    try { book.destroy(); } catch(e) {}
+                }
+
+                try {
+                    // 2. Langsung oper string URL foldernya ke ePub.js (Bypass manual fetch ArrayBuffer)
+                    // ePub.js otomatis mengenali endpoint folder dan hanya menembak file manifest & bab aktif
+                    book = ePub(bookUrl);
+
+                    rendition = book.renderTo("viewer", {
+                        width: "100%",
+                        height: "100%",
+                    });
+
+                    // 3. Cek & Muat Progress Membaca Terakhir dari localStorage
+                    const savedProgress = localStorage.getItem(`progress-${fileName}`);
+
+                    if (savedProgress) {
+                        console.log("Memuat dari progress terakhir:", savedProgress);
+                        await rendition.display(savedProgress);
+                    } else {
+                        console.log("Membuka halaman awal buku.");
+                        await rendition.display();
+                    }
+
+                    console.log("ePub.js: Sukses me-render bab!");
+
+                    // Bersihkan teks loading setelah halaman digambar
+                    const loadingText = viewer.querySelector('p');
+                    if (loadingText) loadingText.remove();
+
+                    // 4. EVENT LISTENER: Simpan koordinat halaman otomatis
+                    rendition.on("relocated", (location) => {
+                        const cfi = location.start.cfi;
+                        localStorage.setItem(`progress-${fileName}`, cfi);
+                        console.log("Progress disimpan otomatis:", cfi);
+                    });
+
+                } catch (err) {
+                    console.error("Gagal memuat dari folder ekstraksi:", err);
+                    viewer.innerHTML = `
+                        <div class="text-center pt-20">
+                            <p class='text-red-500 font-bold mb-2'>Gagal Membuka Buku</p>
+                            <p class='text-gray-400 text-sm'>${err.message}</p>
+                        </div>
+                    `;
+                }
+            }
+
+            document.getElementById('prev-page').addEventListener('click', () => rendition && rendition.prev());
+            document.getElementById('next-page').addEventListener('click', () => rendition && rendition.next());
+
+            window.addEventListener("keyup", (e) => {
+                if (rendition) {
+                    if (e.key === "ArrowLeft") rendition.prev();
+                    if (e.key === "ArrowRight") rendition.next();
+                }
+            });
+
+            backBtn.addEventListener('click', () => {
+                libraryView.classList.remove('hidden');
+                readerView.classList.add('hidden');
+                backBtn.classList.add('hidden');
+                if (book) book.destroy();
+            });
+
+            loadLibrary();
+        </script>
+</body>
+</html>
