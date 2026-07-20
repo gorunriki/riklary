@@ -4,10 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-axum = "0.7"
+axum = { version = "0.7", features = ["multipart"] }
 tokio = { version = "1.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tower-http = { version = "0.5", features = ["cors", "fs"] } # For handling file & cors
 epub = "2.1" #Lib for parsing EPUB and EPUB metadata
 zip = "8.6.0"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+dotenvy = "0.15"
